@@ -1,0 +1,242 @@
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+
+def cal_F(u, v, k, f,Am):
+	""" 
+	Calculate base element of hopf oscillator
+	Input:
+	Output:
+	"""
+	return k*(Am*Am-u**2-v**2)*u - 2*np.pi*f*v,  k*(Am*Am-u**2-v**2)*v + 2*np.pi*f*u
+
+def cal_P_head(post_u, post_v, epsilon, psi):
+	"""
+	"""
+	return epsilon * (post_v*np.cos(psi) - post_u*np.sin(psi))
+
+def cal_P_tail(pre_u, pre_v, epsilon, psi):
+	"""
+	"""
+	return epsilon * (pre_u*np.sin(psi) + pre_v*np.cos(psi))
+
+def cal_P_body(pre_u, pre_v, post_u, post_v, epsilon, psi):
+	"""
+	"""
+	return epsilon * (pre_u*np.sin(psi) + pre_v*np.cos(psi) - post_u*np.sin(psi) + post_v*np.cos(psi))
+
+
+endtime = 11
+step = 0.01
+def CPG_Calulate(k_in):
+    array_u = np.zeros([1,16])
+    array_v = np.zeros([1,16])
+    array_theta=np.zeros([1,16])	
+    array_time= [0] 
+    array_psi_r=[0]
+	# initialize parameter
+    time=0
+    Ax=1
+    k = k_in
+    f = 1
+    check=1
+    epsilon = 0.8
+    psi = -np.pi/3
+
+	# initial state
+    array_u[0][0] = 0
+    array_v[0][0] = 0.001
+
+    for idx in range(1,int(endtime/step)):
+
+        time=time+0.01
+        state_u = []
+        state_v = []
+        state_theta=[]
+		
+        array_theta = np.append(array_theta, np.zeros([1,16]), axis=0)
+        array_u = np.append(array_u, np.zeros([1,16]), axis=0)
+        array_v = np.append(array_v, np.zeros([1,16]), axis=0)
+
+        for i in range(16):
+            A=1
+			# compute the base element
+            F_u, F_v = cal_F(array_u[idx-1][i], array_v[idx-1][i], k, f,Ax)
+			# compute new state of ith CPG at time idx*step with newton approximation
+            new_u = F_u * step + array_u[idx-1][i]
+            if i==0:
+                new_v = (F_v + cal_P_head(array_u[idx-1,1], array_v[idx-1,1], epsilon, psi)) * step + array_v[idx-1][i]
+            elif i==15:
+                new_v = (F_v + cal_P_tail(array_u[idx-1,14], array_v[idx-1,14], epsilon, psi)) * step + array_v[idx-1][i]
+            else: 
+                new_v = (F_v + cal_P_body(array_u[idx-1,i-1], array_v[idx-1,i-1], array_u[idx-1,i+1], array_v[idx-1,i+1], epsilon, psi)) * step + array_v[idx-1][i]
+            new_theta=A*new_u
+			# create new state vector
+            state_u.append(new_u)
+            state_v.append(new_v)
+            state_theta.append(new_theta)
+		# add new state vector to original placeholder
+        array_u[idx] = array_u[idx] + state_u
+        array_v[idx] = array_v[idx] + state_v
+        array_theta[idx]=array_theta[idx]+state_theta
+        if array_u[idx,15] > 0.2:
+            if check == 1:
+                check=0
+                get_time = time
+    error=np.absolute(1-max(array_u[:,5]))
+    return get_time,error
+if __name__ == '__main__':
+    size=150
+    time_array=[]
+    error_array=[]
+    k_array=[]
+
+    reward = np.zeros([size,size])
+    Q_value = np.zeros([size,size])
+
+    time_array=[]
+    error_array=[]
+    k_array=[]
+    for k in range(1,size+1):
+        k_array.append(k)
+        ti,err=CPG_Calulate(k)
+        time_array.append(ti)
+        error_array.append(err)
+        f = open("CPG_data.txt", "a")
+        f.write(str(k)+"\t"+str(ti)+"\t"+str(err)+"\n")
+        f.close()
+        print("k: ",k,"Time: ",ti,"Error: ",err)   
+
+    #  Training
+    gamma = 0.75 # Discount factor 
+    alpha = 0.95 # Learning rate 
+    epsilon=0.7
+    
+    R = reward
+    num_state=size
+    num_action=size
+    add_reward=0
+    R=reward
+    num_episodes=3000
+    
+
+    arr_min_time=[]
+    arr_min_error=[]
+    arr_si =[]
+    print("Q Learning Calculating....")
+    for n in range(0,num_episodes):
+        init_state = random.randint(0,num_state-1)   
+        state_current=init_state 
+        # arr_min_time=[]
+        # arr_min_error=[]
+        arr_si =[] #array of terminal
+
+        pre_ti = time_array[state_current]    # model of time 
+        pre_err= error_array[state_current]    # model of error 
+        if ((n+1) % 100 == 0):
+            print("Episode {} of {}".format(n + 1, num_episodes))
+        while(1):
+            ti_reward=0
+            err_reward=0
+
+            si = 100*pre_err + 10*pre_ti
+            arr_si.append(si)
+            # Update array time and error per esipodes
+            arr_min_time.append(pre_ti)
+            arr_min_error.append(pre_err)
+
+            if np.random.random() < epsilon:
+                action= random.randint(0,num_action-1) 
+            else:
+                action = np.argmax(Q_value[state_current, :])  
+            
+            state_next= action 
+
+            ti = time_array[state_next]
+            err= error_array[state_next]
+            # Update Reward
+            if ti < min(arr_min_time):
+                ti_reward =ti_reward+1
+            elif ti == min(arr_min_time):
+                ti_reward =ti_reward+0.1
+            else:
+                ti_reward =ti_reward+0
+
+            
+            if err < min(arr_min_error):
+                err_reward=err_reward+1
+            elif err == min(arr_min_error):
+                err_reward=err_reward+0.1
+            else:
+                err_reward=err_reward+0
+            
+            si_current= 100*err+10*ti
+            # Reward
+            add_reward =  100*err_reward+10*ti_reward       
+            # Update Q value
+            R[state_current,action]=R[state_current,action]+add_reward
+            TD = R[state_current,action]+gamma*max( Q_value[state_next,:] )-Q_value[state_current,action]
+            Q_value[state_current,action]=Q_value[state_current,action]+alpha*TD
+                
+            state_current = state_next
+            pre_ti=ti
+            pre_err=err
+            if si_current <= min(arr_si):
+                break
+    print("Q Learning Calculated")   
+    print(Q_value)
+    max_value=[]
+    for n in range(0,size):
+        max_value.append( max(Q_value[:,n]) )
+    
+    cov_rate=np.argmax(max_value)+1
+    print(max(max_value))
+    print(cov_rate)
+
+    #plot CPG 
+    Q_plt=Q_value.reshape(-1)
+    action_arr=[]
+    state_arr=[]
+    action_arr_plt=[]
+    state_error_arr_plt=[]
+    state_time_arr_plt=[]
+
+
+    
+    for n in range(0,size):
+        for m in range(0,size):
+            action_arr_plt.append(m+1)
+            state_error_arr_plt.append(error_array[n])
+            state_time_arr_plt.append(time_array[n])
+
+
+    for k in range(0,22500):
+        f = open("Qlearn_data_1.txt", "a")
+        f.write(str(action_arr_plt[k])+"\t"+str(state_error_arr_plt[k])+"\t"+str(Q_plt[k])+"\n")
+        f.close()
+        f = open("Qlearn_data_2.txt", "a")
+        f.write(str(action_arr_plt[k])+"\t"+str(state_time_arr_plt[k])+"\t"+str(Q_plt[k])+"\n")
+        f.close()
+
+    
+    # cmap = plt.cm.get_cmap('jet') # Get desired colormap - you can change this!
+    # max_height = np.max(Q_plt)   # get range of colorbars so we can normalize
+    # min_height = np.min(Q_plt)
+    # # scale each z to [0,1], and get their rgb values
+    # rgba = [cmap((k-min_height)/max_height) for k in Q_plt] 
+    
+    # fig1 = plt.figure()
+    # ax1 = fig1.add_subplot(111, projection='3d')
+    # x = state_arr_plt
+    # y = action_arr_plt
+    # z = np.zeros(22500)
+    # dx = 5*np.ones(22500)
+    # dy = 5*np.ones(22500)
+    # dz = Q_plt
+    # ax1.set_title("Q table")
+    # ax1.bar3d(x, y, z, dx, dy, dz,shade=True,color=rgba)
+    # ax1.set_xlabel("State")
+    # ax1.set_ylabel("Action")
+    # ax1.set_zlabel("Q value")
+    # plt.show()
+
